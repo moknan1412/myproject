@@ -1,236 +1,406 @@
+"""
+==============================================================
+ 통찰적 사고를 위한 비계설정(Scaffolding) 수학 학습 플랫폼
+ 대상 문항: 2023학년도 수능 수학 영역 (기하 / 도형) 기출
+ 구동 방법: streamlit run app.py
+==============================================================
+"""
+
 import streamlit as st
-import sqlite3
-import pandas as pd
+import plotly.graph_objects as go
+import time
+from datetime import datetime
 
-# ── 1. DB 초기화 ──────────────────────────────────────────────
-def init_db():
-    conn = sqlite3.connect('creativity_study.db', check_same_thread=False)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            risk_taking INTEGER,
-            curiosity INTEGER,
-            imagination INTEGER,
-            complexity INTEGER,
-            total_score INTEGER,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-    return conn
+# ─────────────────────────────────────────────
+# 0. 페이지 기본 설정
+# ─────────────────────────────────────────────
+st.set_page_config(
+    page_title="수학 비계설정 플랫폼",
+    page_icon="📐",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-conn = init_db()
+# ─────────────────────────────────────────────
+# 1. 문항 Mock Data  (실제 2022학년도 수능 기하 유사 문항)
+# ─────────────────────────────────────────────
+PROBLEM_DATA = {
+    # ── 문제 발문 (LaTeX 포함) ──────────────────
+    "title": "2023학년도 수능 수학 (기하) — 도형의 성질 활용",
+    "statement": r"""
+삼각형 $ABC$ 의 내부의 점 $P$ 에 대하여
 
-# ── 2. 검사 문항 정의 (50문항) ────────────────────────────────
-questions = {
-    "모험심 (Risk-taking)": [
-        "1. 나는 결과가 불확실하더라도 새로운 일을 시도하는 것을 좋아한다.",
-        "2. 나는 실패할 위험이 있더라도 어려운 문제에 도전한다.",
-        "3. 나는 내 생각이 남들과 다르더라도 당당하게 말한다.",
-        "4. 나는 익숙한 길보다 가보지 않은 길로 가는 것을 좋아한다.",
-        "5. 나는 틀릴 가능성이 있어도 내 의견을 발표한다.",
-        "6. 나는 새로운 게임이나 놀이를 규칙을 몰라도 일단 시작해 본다.",
-        "7. 나는 어려운 일을 끝마쳤을 때 뿌듯함을 느낀다.",
-        "8. 나는 남들이 하지 않는 일을 해보는 것을 즐긴다.",
-        "9. 나는 한 번도 해보지 않은 일을 할 때 가슴이 설렌다.",
-        "10. 나는 문제가 풀리지 않아도 끝까지 혼자 힘으로 해보려 한다.",
-        "11. 나는 새로운 장소에 가는 것을 두려워하지 않는다.",
-        "12. 나는 모르는 사람들에게 먼저 말을 거는 편이다.",
-        "13. 나는 위험 요소가 있어도 흥미로운 일이라면 참여한다."
-    ],
-    "호기심 (Curiosity)": [
-        "14. 나는 사물이 어떻게 작동하는지 궁금해서 분해해 본 적이 있다.",
-        "15. 나는 새로운 기계나 물건을 보면 직접 만져보고 싶어 한다.",
-        "16. 나는 궁금한 것이 생기면 참지 못하고 질문하거나 찾아본다.",
-        "17. 나는 '왜?'라는 질문을 자주 던지는 편이다.",
-        "18. 나는 주변의 작은 변화도 잘 알아차린다.",
-        "19. 나는 텔레비전이나 책에서 본 것을 실제로 확인해보고 싶어 한다.",
-        "20. 나는 자연 현상(날씨, 동물 등)에 관심이 많다.",
-        "21. 나는 새로운 소식이나 정보에 귀를 기울인다.",
-        "22. 나는 모르는 단어가 나오면 그 뜻을 꼭 확인한다.",
-        "23. 나는 신기한 물건을 수집하는 것을 좋아한다.",
-        "24. 나는 여러 가지 일의 원인과 결과에 대해 생각하는 것을 즐긴다."
-    ],
-    "상상력 (Imagination)": [
-        "25. 나는 눈을 감으면 가보지 않은 곳의 풍경이 머릿속에 그려진다.",
-        "26. 나는 구름의 모양을 보고 동물이나 사물을 떠올린다.",
-        "27. 나는 내가 만약 초능력이 있다면 어떨지 자주 상상한다.",
-        "28. 나는 이야기의 결말을 내 마음대로 바꾸어 상상해 보곤 한다.",
-        "29. 나는 미래의 세상이 어떻게 변할지 상상하는 것이 즐겁다.",
-        "30. 나는 사물들이 말을 할 수 있다면 어떨지 생각한다.",
-        "31. 나는 가끔 현실에 없는 나만의 가상 세계를 만든다.",
-        "32. 나는 꿈속에서 본 내용을 기억해서 이야기하는 것을 좋아한다.",
-        "33. 나는 그림을 그릴 때 실제와 다르게 그리는 것을 좋아한다.",
-        "34. 나는 소설이나 영화 속 주인공이 된 나를 상상한다.",
-        "35. 나는 아무것도 없는 백지를 볼 때 무엇을 그릴지 아이디어가 샘솟는다.",
-        "36. 나는 소리나 음악을 들으면 특정한 색깔이나 장면이 떠오른다.",
-        "37. 나는 만약 내가 동물이 된다면 어떤 동물이 될지 생각해 본 적이 있다."
-    ],
-    "복잡성 (Complexity)": [
-        "38. 나는 정답이 하나뿐인 문제보다 여러 가지 답이 있는 문제가 좋다.",
-        "39. 나는 복잡한 퍼즐이나 퀴즈를 푸는 것을 즐긴다.",
-        "40. 나는 사물을 한 방향에서만 보지 않고 여러 각도에서 보려 노력한다.",
-        "41. 나는 뒤섞여 있는 정보들을 정리하여 새로운 질서를 만드는 것을 좋아한다.",
-        "42. 나는 어려운 책이나 내용을 이해했을 때 큰 기쁨을 느낀다.",
-        "43. 나는 단순한 일보다는 머리를 많이 써야 하는 복잡한 일을 선호한다.",
-        "44. 나는 하나를 배우면 그것을 다른 곳에도 적용해 보려 한다.",
-        "45. 나는 완벽한 계획을 세우기 위해 세세한 부분까지 신경 쓴다.",
-        "46. 나는 논리적으로 따져보는 것을 좋아한다.",
-        "47. 나는 친구들과 토론하며 서로의 생각을 나누는 것을 즐긴다.",
-        "48. 나는 어떤 현상의 이면에 숨겨진 의미를 찾으려 노력한다.",
-        "49. 나는 규칙이 복잡한 게임일수록 더 흥미를 느낀다.",
-        "50. 나는 한 가지 문제를 해결하기 위해 오랫동안 집중할 수 있다."
-    ]
+$$PA = PB = PC = 5, \quad \sin(\angle APB) = \dfrac{4}{5}$$
+
+일 때, 삼각형 $ABC$ 의 외접원의 반지름 $R$ 을 구하고,
+삼각형 $ABC$ 의 넓이를 구하시오.
+
+단, $\angle APB$ 는 점 $P$ 를 공유하는 두 선분 $PA$, $PB$ 가 이루는 각이다.
+""",
+    # ── 정답 ────────────────────────────────────
+    "answer": 6,          # 외접원 반지름 R (사인법칙 적용 결과)
+    "answer_label": "외접원의 반지름 R",
+
+    # ── 단계별 비계 (힌트) ──────────────────────
+    "scaffolds": {
+        1: {
+            "title": "1단계 · 조건의 재발견",
+            "emoji": "🔍",
+            "color": "#4A90D9",
+            "content": r"""
+**[조건을 다시 읽어보자]**
+
+문제에서 제시한 세 조건에 주목해 봐.
+
+$$PA = PB = PC = 5$$
+
+이 조건이 의미하는 것은 무엇일까?
+점 $P$ 에서 세 꼭짓점 $A$, $B$, $C$ 까지의 **거리가 모두 동일**하다는 뜻이야.
+
+> 💡 어떤 점이 세 꼭짓점으로부터 등거리에 있을 때,
+> 그 점은 삼각형에서 어떤 특별한 점일까?
+""",
+        },
+        2: {
+            "title": "2단계 · 개념적 통찰",
+            "emoji": "💡",
+            "color": "#F5A623",
+            "content": r"""
+**[핵심 개념: 외심(外心)]**
+
+세 꼭짓점으로부터 등거리에 있는 점 → 삼각형의 **외심(Circumcenter)** 이야!
+
+$$\therefore \; P \text{ 는 삼각형 } ABC \text{ 의 외심}$$
+
+외심은 외접원의 **중심**이기도 해. 즉,
+
+$$\text{외접원의 반지름} \; R = PA = PB = PC = 5$$
+
+이제 $R = 5$ 임을 알았어.
+
+> 💡 다음으로, 주어진 $\sin(\angle APB)$ 를 어디에 활용할 수 있을까?
+> 변과 각의 관계를 연결하는 법칙을 떠올려봐.
+""",
+        },
+        3: {
+            "title": "3단계 · 관계적 비계설정",
+            "emoji": "🧮",
+            "color": "#7ED321",
+            "content": r"""
+**[사인법칙 적용]**
+
+외심 $P$ 에서 이루는 중심각과 호의 관계를 이용해.
+$\angle APB$ 는 호 $AB$ 에 대한 **중심각**이고,
+원주각은 중심각의 절반이므로
+
+$$\angle ACB = \dfrac{1}{2} \angle APB$$
+
+사인법칙에 의해
+
+$$\dfrac{AB}{\sin(\angle ACB)} = 2R$$
+
+$\angle APB$ 에 대해 코사인 법칙으로 $AB$ 를 구하고,
+$\sin(\angle ACB) = \sin\!\left(\dfrac{\angle APB}{2}\right)$ 를 반각 공식으로 풀면
+
+$$R = 5, \quad AB = 6 \quad \Rightarrow \quad \sin(\angle ACB) = \dfrac{1}{2}$$
+
+> ✅ 이제 넓이는 $\frac{1}{2} \cdot AB \cdot AC \cdot \sin(\angle BAC)$ 또는
+> 사인법칙·코사인법칙 조합으로 완성할 수 있어!
+""",
+        },
+    },
 }
 
-# ── 3. 세션 상태 초기화 ───────────────────────────────────────
-# page : "home" | "survey"
-if "page" not in st.session_state:
-    st.session_state.page = "home"
+# ─────────────────────────────────────────────
+# 2. Session State 초기화
+# ─────────────────────────────────────────────
+def init_session():
+    """앱 최초 진입 시 세션 변수를 초기화한다."""
+    if "start_time" not in st.session_state:
+        st.session_state.start_time = time.time()          # 앱 진입 시각 (Unix)
+    if "scaffold_log" not in st.session_state:
+        # 타임스탬프 로그: [(경과_초, 비계_레벨), ...]
+        # 초기값: 시간=0, 레벨=0 (힌트 미사용 상태)
+        st.session_state.scaffold_log = [(0.0, 0)]
+    if "opened_levels" not in st.session_state:
+        st.session_state.opened_levels = set()             # 이미 열람한 레벨 집합
+    if "submitted" not in st.session_state:
+        st.session_state.submitted = False
+    if "answer_correct" not in st.session_state:
+        st.session_state.answer_correct = None
+    if "user_answer" not in st.session_state:
+        st.session_state.user_answer = 0.0
 
-# ══════════════════════════════════════════════════════════════
-# PAGE 1 ─ 홈 (안내 페이지)
-# ══════════════════════════════════════════════════════════════
-if st.session_state.page == "home":
+init_session()
 
-    st.title("🎨 윌리엄스 창의적 인성 검사 (CFS)")
-    st.markdown("---")
+# ─────────────────────────────────────────────
+# 3. 헬퍼 함수
+# ─────────────────────────────────────────────
+def elapsed() -> float:
+    """앱 진입 시각으로부터 경과한 시간(초)을 반환한다."""
+    return round(time.time() - st.session_state.start_time, 1)
 
-    st.subheader("📋 검사 안내")
 
-    st.markdown("""
-    **윌리엄스 창의적 인성 검사(Creativity Assessment Packet, CFS)** 는  
-    Frank E. Williams가 개발한 창의성 측정 도구로,  
-    개인의 창의적 성향을 4가지 영역으로 평가합니다.
-    """)
+def log_scaffold(level: int):
+    """
+    비계 버튼 클릭 시 호출.
+    - 현재 경과 시간과 클릭한 레벨을 로그에 append.
+    - 동일 레벨을 다시 열어도 중복 기록하지 않는다.
+    """
+    if level not in st.session_state.opened_levels:
+        st.session_state.scaffold_log.append((elapsed(), level))
+        st.session_state.opened_levels.add(level)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info("🏔️ **모험심 (Risk-taking)**\n\n불확실한 상황에서도 새로운 것에 도전하고 위험을 감수하는 성향")
-        st.info("🔬 **호기심 (Curiosity)**\n\n주변 현상에 의문을 품고 탐색하며 알아가려는 성향")
-    with col2:
-        st.info("💭 **상상력 (Imagination)**\n\n현실을 넘어 새로운 세계와 아이디어를 그려내는 성향")
-        st.info("🧩 **복잡성 (Complexity)**\n\n복잡한 문제를 즐기고 다양한 관점에서 사고하는 성향")
 
-    st.markdown("---")
-    st.subheader("📌 검사 방법")
-    st.markdown("""
-    - 총 **50문항**으로 구성되어 있습니다.
-    - 각 문항을 읽고 본인에게 해당하는 정도를 **1~4점** 중 선택합니다.
+def build_insight_graph() -> go.Figure:
+    """
+    누적된 scaffold_log 를 기반으로 Insight Flow Graph 를 생성한다.
+    X축: 경과 시간(초), Y축: 비계 의존도 레벨(0~3)
+    """
+    log = st.session_state.scaffold_log
 
-    | 점수 | 의미 |
-    |------|------|
-    | 1점 | 전혀 그렇지 않다 |
-    | 2점 | 그렇지 않다 |
-    | 3점 | 그렇다 |
-    | 4점 | 매우 그렇다 |
+    # 그래프에 표시할 시간·레벨 시퀀스 추출
+    x_vals = [entry[0] for entry in log]
+    y_vals = [entry[1] for entry in log]
 
-    - 소요 시간은 약 **10~15분** 입니다.
-    - 정답은 없으며, **솔직하게** 응답할수록 정확한 결과를 얻을 수 있습니다.
-    - 검사 결과는 데이터베이스에 저장되어 연구 목적으로 활용될 수 있습니다.
-    """)
+    # 마지막 점 이후 현재 시각까지 수평선 연장 (실시간 느낌)
+    x_vals_ext = x_vals + [elapsed()]
+    y_vals_ext = y_vals + [y_vals[-1]]
 
-    st.markdown("---")
-    st.subheader("⚠️ 유의 사항")
-    st.markdown("""
-    - 본 검사는 **심리 진단 도구가 아니며**, 창의적 성향을 탐색하는 참고 자료입니다.
-    - 검사 도중 페이지를 새로고침하면 **응답 내용이 초기화**됩니다.
-    - 제출 후에는 응답을 수정할 수 없으니 신중하게 답변해 주세요.
-    """)
+    # ── 마커 색상: 레벨별 구분 ──────────────────
+    color_map = {0: "#AAAAAA", 1: "#4A90D9", 2: "#F5A623", 3: "#7ED321"}
+    marker_colors = [color_map.get(lv, "#AAAAAA") for lv in y_vals]
 
-    st.markdown("")
-    col_btn, _ = st.columns([1, 2])
-    with col_btn:
-        if st.button("✅ 설문 참여하기", use_container_width=True, type="primary"):
-            st.session_state.page = "survey"
-            st.rerun()
+    fig = go.Figure()
 
-# ══════════════════════════════════════════════════════════════
-# PAGE 2 ─ 설문 페이지
-# ══════════════════════════════════════════════════════════════
-elif st.session_state.page == "survey":
+    # 꺾은선 (step 스타일 — 레벨이 올라가는 순간 계단식으로 표현)
+    fig.add_trace(go.Scatter(
+        x=x_vals_ext,
+        y=y_vals_ext,
+        mode="lines",
+        line=dict(color="#4A90D9", width=2, shape="hv"),   # 'hv' = 수평 후 수직
+        name="비계 의존도 흐름",
+        hovertemplate="경과 %{x}초<br>레벨 %{y}<extra></extra>",
+    ))
 
-    st.title("🎨 윌리엄스 창의적 인성 검사 (CFS)")
+    # 이벤트 마커 (힌트를 열람한 시점)
+    fig.add_trace(go.Scatter(
+        x=x_vals,
+        y=y_vals,
+        mode="markers+text",
+        marker=dict(size=10, color=marker_colors, line=dict(width=1.5, color="white")),
+        text=[f"Lv{lv}" if lv > 0 else "시작" for lv in y_vals],
+        textposition="top center",
+        textfont=dict(size=11),
+        name="힌트 열람 시점",
+        hovertemplate="경과 %{x}초 · 비계 레벨 %{y}<extra></extra>",
+    ))
 
-    # 홈으로 돌아가기
-    if st.button("← 안내 페이지로 돌아가기"):
-        st.session_state.page = "home"
+    fig.update_layout(
+        title=dict(
+            text="📊 Insight Flow Graph — 실시간 사고 흐름 추적",
+            font=dict(size=15),
+        ),
+        xaxis=dict(
+            title="경과 시간 (초)",
+            ticksuffix="s",
+            gridcolor="#EEEEEE",
+            zeroline=False,
+        ),
+        yaxis=dict(
+            title="비계 의존도 (Level)",
+            tickvals=[0, 1, 2, 3],
+            ticktext=["0 · 독립", "1 · 조건재발견", "2 · 개념통찰", "3 · 관계적비계"],
+            range=[-0.3, 3.5],
+            gridcolor="#EEEEEE",
+        ),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        margin=dict(l=40, r=20, t=60, b=40),
+        height=300,
+    )
+    return fig
+
+# ─────────────────────────────────────────────
+# 4. 사이드바 — 학습 진행 현황
+# ─────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 📐 학습 현황 대시보드")
+    st.divider()
+
+    # 경과 시간
+    st.metric("⏱ 경과 시간", f"{elapsed()} 초")
+
+    # 열람한 비계 단계
+    opened = sorted(st.session_state.opened_levels)
+    if opened:
+        st.metric("🔓 열람한 비계 단계", f"{len(opened)} / 3 단계")
+        st.write("열람 순서:", " → ".join([f"Lv{lv}" for lv in opened]))
+    else:
+        st.metric("🔓 열람한 비계 단계", "0 / 3 단계")
+        st.caption("아직 힌트를 사용하지 않았어요 🎯")
+
+    st.divider()
+
+    # 자가 점검 체크리스트
+    st.markdown("### ✅ 자가 점검")
+    st.checkbox("$PA=PB=PC$ 의 기하학적 의미를 파악했나요?")
+    st.checkbox("외심과 외접원의 관계를 이해했나요?")
+    st.checkbox("사인법칙을 적용할 준비가 됐나요?")
+
+    st.divider()
+    # 초기화 버튼
+    if st.button("🔄 처음부터 다시 풀기", width='stretch'):
+        for key in ["start_time", "scaffold_log", "opened_levels",
+                    "submitted", "answer_correct", "user_answer"]:
+            if key in st.session_state:
+                del st.session_state[key]
         st.rerun()
 
-    st.markdown("""
-    각 문항을 읽고 본인에게 가장 가깝다고 생각되는 정도를 선택해 주세요.
-    - **1점: 전혀 그렇지 않다 / 2점: 그렇지 않다 / 3점: 그렇다 / 4점: 매우 그렇다**
-    ---
-    """)
+# ─────────────────────────────────────────────
+# 5. 메인 화면
+# ─────────────────────────────────────────────
 
-    # ── 4. 검사 폼 ────────────────────────────────────────────
-    with st.form("cfs_form"):
-        user_name = st.text_input("검사 대상자 성함")
+# ── 5-A. 헤더 ──────────────────────────────────
+st.markdown(
+    "<h1 style='font-size:1.6rem; font-weight:700; margin-bottom:0.2rem;'>"
+    "🔭 통찰적 사고를 위한 비계설정 수학 학습 플랫폼"
+    "</h1>",
+    unsafe_allow_html=True,
+)
+st.caption("평가원 기출 · 도형의 성질 | 비계설정(Scaffolding) 단계별 힌트 제공")
+st.divider()
 
-        user_responses = {}
-        tabs = st.tabs(list(questions.keys()))
+# ── 5-B. 문제 발문 + 도형 이미지 (2-column) ──────
+col_prob, col_img = st.columns([3, 2], gap="large")
 
-        for i, (category, q_list) in enumerate(questions.items()):
-            with tabs[i]:
-                st.subheader(f"📍 {category}")
-                for q in q_list:
-                    response = st.radio(q, [1, 2, 3, 4], index=2, horizontal=True, key=q)
-                    user_responses[q] = response
+with col_prob:
+    st.markdown(f"### 📝 {PROBLEM_DATA['title']}")
+    st.markdown(PROBLEM_DATA["statement"])
 
-        submitted = st.form_submit_button("검사 완료 및 결과 저장")
+with col_img:
+    # 실제 이미지가 없을 경우 안내 박스로 대체
+    st.info(
+        "📐 **도형 이미지 영역**\n\n"
+        "평가원 기출 문항의 기하학적 도형 그림을 여기에 부착합니다.\n\n"
+        "삼각형 $ABC$ 내부에 외심 $P$ 가 위치하며,\n"
+        "$PA = PB = PC = 5$ 인 외접원이 그려진 도형입니다."
+    )
+    # 실제 이미지가 있다면 아래 주석 해제 후 경로 지정:
+    # st.image("assets/problem_figure.png", caption="출처: 2023학년도 수능", width='stretch')
 
-    # ── 5. 제출 처리 ──────────────────────────────────────────
+st.divider()
+
+# ── 5-C. 정답 입력 영역 ────────────────────────
+st.markdown("### 💬 정답 입력")
+
+with st.form(key="answer_form", clear_on_submit=False):
+    answer_col, btn_col = st.columns([3, 1])
+    with answer_col:
+        user_val = st.number_input(
+            label=f"**{PROBLEM_DATA['answer_label']}** 를 입력하세요",
+            min_value=0.0,
+            max_value=1000.0,
+            step=0.5,
+            value=float(st.session_state.user_answer),
+            format="%.1f",
+            help="소수점 입력도 가능합니다.",
+        )
+    with btn_col:
+        submitted = st.form_submit_button("✅ 제출", width='stretch')
+
     if submitted:
-        if not user_name.strip():
-            st.error("성함을 입력해 주세요!")
-        else:
-            scores = {
-                cat: sum(user_responses[q] for q in q_list)
-                for cat, q_list in questions.items()
-            }
-            total = sum(scores.values())
+        st.session_state.submitted = True
+        st.session_state.user_answer = user_val
+        # 정답 판별 (소수점 허용: 0.5 오차 이내 정답 처리)
+        st.session_state.answer_correct = (
+            abs(user_val - PROBLEM_DATA["answer"]) <= 0.5
+        )
 
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT INTO results (name, risk_taking, curiosity, imagination, complexity, total_score) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    user_name,
-                    scores["모험심 (Risk-taking)"],
-                    scores["호기심 (Curiosity)"],
-                    scores["상상력 (Imagination)"],
-                    scores["복잡성 (Complexity)"],
-                    total,
-                ),
-            )
-            conn.commit()
-
-            st.success(f"축하합니다, {user_name}님! 검사가 완료되었습니다.")
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("모험심", f"{scores['모험심 (Risk-taking)']}점")
-            col2.metric("호기심", f"{scores['호기심 (Curiosity)']}점")
-            col3.metric("상상력", f"{scores['상상력 (Imagination)']}점")
-            col4.metric("복잡성", f"{scores['복잡성 (Complexity)']}점")
-            st.subheader(f"총점: {total} / 200")
-
-    # ── 6. 전체 결과 현황 (항상 노출) ────────────────────────
-    st.markdown("---")
-    st.subheader("📊 전체 검사 결과 현황")
-
-    df = pd.read_sql_query("SELECT * FROM results", conn)
-
-    if df.empty:
-        st.info("아직 저장된 검사 결과가 없습니다.")
+# 제출 결과 표시
+if st.session_state.submitted:
+    if st.session_state.answer_correct:
+        st.success(
+            f"🎉 **정답입니다!** 외접원의 반지름 $R = {PROBLEM_DATA['answer']}$ 이 맞아요.\n\n"
+            f"열람한 비계: {len(st.session_state.opened_levels)}단계 / "
+            f"소요 시간: {elapsed()}초"
+        )
     else:
-        search_query = st.text_input("🔍 이름으로 검색", placeholder="검색할 이름을 입력하세요")
-        if search_query.strip():
-            filtered_df = df[df["name"].str.contains(search_query.strip(), case=False, na=False)]
-            if filtered_df.empty:
-                st.warning(f"'{search_query}'에 해당하는 결과가 없습니다.")
+        st.error(
+            f"❌ 아직 아니에요. 입력값: **{st.session_state.user_answer}**\n\n"
+            "아래 비계설정 힌트를 단계적으로 활용해보세요!"
+        )
+
+st.divider()
+
+# ── 5-D. 단계별 비계설정 영역 ────────────────────
+st.markdown("### 🪜 단계별 비계설정 (Scaffolding)")
+st.caption(
+    "💬 힌트는 순서대로 열어보세요. 각 단계를 열 때마다 사고 흐름 그래프가 업데이트됩니다."
+)
+
+scaffold_cols = st.columns(3, gap="medium")
+
+for col, (level, data) in zip(scaffold_cols, PROBLEM_DATA["scaffolds"].items()):
+    with col:
+        # 이미 열람한 단계는 배지 표시
+        already_opened = level in st.session_state.opened_levels
+        badge = "✅ 열람함" if already_opened else "🔒 미열람"
+
+        # st.expander 로 구현 — 클릭 감지는 버튼으로 처리
+        with st.expander(
+            f"{data['emoji']} **{data['title']}**  ·  {badge}",
+            expanded=already_opened,
+        ):
+            st.markdown(data["content"])
+            if not already_opened:
+                if st.button(
+                    f"이 비계 기록하기",
+                    key=f"btn_scaffold_{level}",
+                    help="클릭하면 현재 시각과 레벨이 사고 흐름 그래프에 기록됩니다.",
+                    width='stretch',
+                ):
+                    log_scaffold(level)
+                    st.rerun()
             else:
-                st.write(f"검색 결과: **{len(filtered_df)}건**")
-                st.markdown("---")
-                st.dataframe(filtered_df, use_container_width=True)
-        else:
-            st.dataframe(df, use_container_width=True)
+                st.caption(f"열람 시각: {elapsed()}초 경과 시점에 기록됨")
+
+st.divider()
+
+# ── 5-E. Insight Flow Graph ──────────────────────
+st.markdown("### 📊 Insight Flow Graph — 실시간 사고 흐름 추적")
+st.caption(
+    "X축: 앱 진입 후 경과 시간(초) | Y축: 비계 의존도 레벨(0=독립, 3=최대 지원)\n"
+    "힌트를 열람하지 않고 정답을 맞힐수록 Level 0에 가까운 직선이 그려집니다."
+)
+
+# 그래프 렌더링
+fig = build_insight_graph()
+st.plotly_chart(fig, width='stretch')
+
+# 로그 상세 테이블 (접기/펴기)
+with st.expander("📋 상세 로그 보기", expanded=False):
+    log_display = [
+        {
+            "순서": i + 1,
+            "경과 시간(초)": entry[0],
+            "비계 레벨": entry[1],
+            "설명": (
+                "앱 시작" if entry[1] == 0
+                else PROBLEM_DATA["scaffolds"][entry[1]]["title"]
+            ),
+        }
+        for i, entry in enumerate(st.session_state.scaffold_log)
+    ]
+    st.dataframe(log_display, width='stretch', hide_index=True)
+
+# ─────────────────────────────────────────────
+# 6. 푸터
+# ─────────────────────────────────────────────
+st.divider()
+st.caption(
+    "🏫 통찰적 사고를 위한 비계설정 수학 학습 플랫폼 · 프로토타입 v0.1\n\n"
+    "문항 출처: 2023학년도 수능 수학 기출 유사 문항 | "
+    "Scaffolding 이론 기반 설계 (Wood, Bruner & Ross, 1976)"
+)
